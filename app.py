@@ -346,7 +346,8 @@ def openssl_test():
         out = result.stdout.decode('utf-8', errors='replace')
         err = result.stderr.decode('utf-8', errors='replace')
         # mostrar apenas as últimas 2000 chars do stderr para ver o erro
-        return f'RC={result.returncode}\nSTDOUT:\n{out[:500]}\nSTDERR (tail):\n{err[-2000:]}', 200, {'Content-Type': 'text/plain'}
+        # mostrar últimas 3000 chars de stdout para ver resposta HTTP
+        return f'RC={result.returncode}\nSTDOUT (tail):\n{out[-3000:]}\nSTDERR (tail):\n{err[-500:]}', 200, {'Content-Type': 'text/plain'}
     except Exception as e:
         return f'error: {e}', 200, {'Content-Type': 'text/plain'}
 
