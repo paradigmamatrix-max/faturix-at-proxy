@@ -52,7 +52,7 @@ def proxy():
                 'SOAPAction': soap_action,
             },
             timeout=30,
-            verify=True,
+            verify=False,
         )
         return Response(
             resp.content,
