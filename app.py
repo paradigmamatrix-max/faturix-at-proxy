@@ -3,8 +3,12 @@ Faturix AT SOAP Proxy
 Relay entre backoffice.faturix.pt e os WebServices AT (portas 700/400)
 """
 import os
-import httpx
+import ssl
+import certifi
+import urllib3
 from flask import Flask, request, Response
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
@@ -13,7 +17,30 @@ AT_URLS = {
     'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
 }
 
-_client = httpx.Client(verify=False, timeout=30.0)
+
+def _make_pool():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cafile=certifi.where())
+    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+    try:
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    except AttributeError:
+        pass
+    try:
+        ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    except AttributeError:
+        pass
+    # Pass ssl_context; also tell urllib3 not to verify hostname/cert
+    return urllib3.PoolManager(
+        ssl_context=ctx,
+        assert_hostname=False,
+        cert_reqs='CERT_NONE',
+    )
+
+
+_pool = _make_pool()
 
 
 @app.route('/', methods=['POST'])
@@ -28,21 +55,25 @@ def proxy():
     soap_body = request.get_data()
 
     try:
-        resp = _client.post(
+        resp = _pool.request(
+            'POST',
             at_url,
-            content=soap_body,
+            body=soap_body,
             headers={
                 'Content-Type': 'text/xml; charset=utf-8',
                 'SOAPAction':   soap_action,
             },
+            timeout=urllib3.Timeout(connect=10, read=30),
         )
         return Response(
-            resp.content,
-            status=resp.status_code,
+            resp.data,
+            status=resp.status,
             headers={'Content-Type': 'text/xml; charset=utf-8'},
         )
-    except httpx.HTTPError as e:
-        return Response(f'HTTP error: {e}', status=502)
+    except urllib3.exceptions.SSLError as e:
+        return Response(f'SSL error: {e}', status=502)
+    except urllib3.exceptions.MaxRetryError as e:
+        return Response(f'Connection error: {e}', status=502)
     except Exception as e:
         return Response(f'Proxy error: {e}', status=502)
 
