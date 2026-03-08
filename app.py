@@ -234,9 +234,11 @@ def curl_test():
              '-H', 'Content-Type: text/xml; charset=utf-8',
              '-H', 'SOAPAction: versao',
              '-d', soap],
-            capture_output=True, text=True, timeout=25
+            capture_output=True, timeout=25
         )
-        return f'STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}', 200, {'Content-Type': 'text/plain'}
+        out = result.stdout.decode('utf-8', errors='replace')
+        err = result.stderr.decode('utf-8', errors='replace')
+        return f'RC={result.returncode}\nSTDOUT:\n{out}\n\nSTDERR:\n{err}', 200, {'Content-Type': 'text/plain'}
     except Exception as e:
         return f'subprocess error: {e}', 200, {'Content-Type': 'text/plain'}
 
