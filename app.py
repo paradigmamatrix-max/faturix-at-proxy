@@ -3,7 +3,10 @@ Faturix AT SOAP Proxy
 Relay entre backoffice.faturix.pt e os WebServices AT (portas 700/400)
 """
 import os
+import ssl
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from flask import Flask, request, Response
 
 app = Flask(__name__)
@@ -13,10 +16,23 @@ AT_URLS = {
     'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
 }
 
+class LegacySSLAdapter(HTTPAdapter):
+    """Permite TLS legacy para servidores AT (governo português usa cifras antigas)"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        try:
+            ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+        except AttributeError:
+            pass
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
 @app.route('/', methods=['POST'])
 def proxy():
-    endpoint   = request.headers.get('X-AT-Endpoint', 'series').lstrip('/')
-    ambiente   = request.headers.get('X-AT-Ambiente', 'teste')
+    endpoint    = request.headers.get('X-AT-Endpoint', 'series').lstrip('/')
+    ambiente    = request.headers.get('X-AT-Ambiente', 'teste')
     soap_action = request.headers.get('X-SOAP-Action', '')
 
     base_url = AT_URLS.get(ambiente, AT_URLS['teste'])
@@ -24,8 +40,11 @@ def proxy():
 
     soap_body = request.get_data()
 
+    session = requests.Session()
+    session.mount('https://', LegacySSLAdapter())
+
     try:
-        resp = requests.post(
+        resp = session.post(
             at_url,
             data=soap_body,
             headers={
