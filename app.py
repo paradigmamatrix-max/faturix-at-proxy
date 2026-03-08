@@ -7,19 +7,16 @@ import ssl
 import socket
 import base64
 import certifi
-import urllib3
+import http.client
 from urllib3.util.ssl_ import create_urllib3_context
 from flask import Flask, request, Response
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 app = Flask(__name__)
 
-AT_URLS = {
-    'teste':    'https://servicos.portaldasfinancas.gov.pt:700/fews',
-    'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
+AT_PORTS = {
+    'teste':    700,
+    'producao': 400,
 }
-
 AT_HOST = 'servicos.portaldasfinancas.gov.pt'
 
 
@@ -36,14 +33,21 @@ def _make_ctx():
     return ctx
 
 
-def _make_pool():
-    return urllib3.PoolManager(
-        ssl_context=_make_ctx(),
-        assert_hostname=False,
-    )
+class ATHTTPSConn(http.client.HTTPSConnection):
+    """Ligação HTTPS com ssl_context personalizado (handshake manual)"""
+    def __init__(self, host, port, ssl_ctx):
+        super().__init__(host, port=port, timeout=30)
+        self._ssl_ctx = ssl_ctx
 
-
-_pool = _make_pool()
+    def connect(self):
+        raw = socket.create_connection((self.host, self.port), timeout=10)
+        ssl_sock = self._ssl_ctx.wrap_socket(
+            raw,
+            server_hostname=self.host,
+            do_handshake_on_connect=False,
+        )
+        ssl_sock.do_handshake()
+        self.sock = ssl_sock
 
 
 @app.route('/', methods=['POST'])
@@ -52,30 +56,31 @@ def proxy():
     ambiente    = request.headers.get('X-AT-Ambiente', 'teste')
     soap_action = request.headers.get('X-SOAP-Action', '')
 
-    base_url = AT_URLS.get(ambiente, AT_URLS['teste'])
-    at_url   = f"{base_url}/{endpoint}"
-
+    port     = AT_PORTS.get(ambiente, AT_PORTS['teste'])
+    path     = f'/fews/{endpoint}'
     soap_body = request.get_data()
 
     try:
-        resp = _pool.request(
-            'POST',
-            at_url,
-            body=soap_body,
+        conn = ATHTTPSConn(AT_HOST, port, _make_ctx())
+        conn.request(
+            'POST', path, body=soap_body,
             headers={
                 'Content-Type': 'text/xml; charset=utf-8',
                 'SOAPAction':   soap_action,
+                'Host':         AT_HOST,
             },
-            timeout=urllib3.Timeout(connect=10, read=30),
         )
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
         return Response(
-            resp.data,
+            data,
             status=resp.status,
             headers={'Content-Type': 'text/xml; charset=utf-8'},
         )
-    except urllib3.exceptions.SSLError as e:
+    except ssl.SSLError as e:
         return Response(f'SSL error: {e}', status=502)
-    except urllib3.exceptions.MaxRetryError as e:
+    except OSError as e:
         return Response(f'Connection error: {e}', status=502)
     except Exception as e:
         return Response(f'Proxy error: {e}', status=502)
@@ -89,15 +94,12 @@ def get_cert():
     try:
         sock = socket.create_connection((AT_HOST, 700), timeout=10)
         ssl_sock = ctx2.wrap_socket(
-            sock,
-            server_hostname=AT_HOST,
-            do_handshake_on_connect=False,
-        )
+            sock, server_hostname=AT_HOST, do_handshake_on_connect=False)
         try:
             ssl_sock.do_handshake()
-            lines.append('Handshake OK (no cert error)')
+            lines.append('Handshake OK')
         except ssl.SSLCertVerificationError as e:
-            lines.append(f'CertVerificationError (expected): {e}')
+            lines.append(f'CertVerificationError: {e}')
         except ssl.SSLError as e:
             lines.append(f'SSLError: {e}')
             return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
@@ -109,7 +111,7 @@ def get_cert():
                        + '-----END CERTIFICATE-----')
                 lines.append(pem)
             else:
-                lines.append('No peer cert (binary_form=True returned empty)')
+                lines.append('No peer cert')
         except Exception as e2:
             lines.append(f'getpeercert error: {e2}')
     except Exception as e:
