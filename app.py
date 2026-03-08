@@ -30,6 +30,10 @@ class LegacySSLAdapter(HTTPAdapter):
         kwargs['ssl_context'] = ctx
         return super().init_poolmanager(*args, **kwargs)
 
+    def cert_verify(self, conn, url, verify, cert):
+        # AT usa certificado auto-assinado — não verificar
+        pass
+
 
 @app.route('/', methods=['POST'])
 def proxy():
