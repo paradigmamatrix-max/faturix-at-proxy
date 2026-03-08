@@ -21,6 +21,8 @@ class LegacySSLAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = create_urllib3_context()
         ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         try:
             ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
         except AttributeError:
