@@ -4,8 +4,11 @@ Relay entre backoffice.faturix.pt e os WebServices AT (portas 700/400)
 """
 import os
 import ssl
+import socket
+import base64
 import certifi
 import urllib3
+from urllib3.util.ssl_ import create_urllib3_context
 from flask import Flask, request, Response
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -17,24 +20,25 @@ AT_URLS = {
     'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
 }
 
+AT_HOST = 'servicos.portaldasfinancas.gov.pt'
 
-def _make_pool():
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+def _make_ctx():
+    ctx = create_urllib3_context()
+    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=certifi.where())
-    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
-    try:
-        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-    except AttributeError:
-        pass
     try:
         ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
     except AttributeError:
         pass
-    # Pass ssl_context; also tell urllib3 not to verify hostname/cert
+    return ctx
+
+
+def _make_pool():
     return urllib3.PoolManager(
-        ssl_context=ctx,
+        ssl_context=_make_ctx(),
         assert_hostname=False,
         cert_reqs='CERT_NONE',
     )
@@ -80,25 +84,14 @@ def proxy():
 
 @app.route('/get-cert')
 def get_cert():
-    """Extrai o certificado TLS da AT para diagnóstico"""
-    import socket
-    import base64
-    ctx2 = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx2.check_hostname = False
-    ctx2.verify_mode = ssl.CERT_REQUIRED
-    ctx2.load_verify_locations(cafile=certifi.where())
-    ctx2.set_ciphers('DEFAULT@SECLEVEL=1')
-    try:
-        ctx2.maximum_version = ssl.TLSVersion.TLSv1_2
-    except AttributeError:
-        pass
+    """Extrai o certificado TLS da AT"""
+    ctx2 = _make_ctx()
     lines = []
     try:
-        sock = socket.create_connection(
-            ('servicos.portaldasfinancas.gov.pt', 700), timeout=10)
+        sock = socket.create_connection((AT_HOST, 700), timeout=10)
         ssl_sock = ctx2.wrap_socket(
             sock,
-            server_hostname='servicos.portaldasfinancas.gov.pt',
+            server_hostname=AT_HOST,
             do_handshake_on_connect=False,
         )
         try:
@@ -108,8 +101,7 @@ def get_cert():
             lines.append(f'CertVerificationError (expected): {e}')
         except ssl.SSLError as e:
             lines.append(f'SSLError: {e}')
-            return '\n'.join(lines)
-        # Try to get peer cert even after error
+            return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
         try:
             der = ssl_sock.getpeercert(binary_form=True)
             if der:
@@ -118,7 +110,7 @@ def get_cert():
                        + '-----END CERTIFICATE-----')
                 lines.append(pem)
             else:
-                lines.append('No peer cert available')
+                lines.append('No peer cert (binary_form=True returned empty)')
         except Exception as e2:
             lines.append(f'getpeercert error: {e2}')
     except Exception as e:
