@@ -33,6 +33,16 @@ def _make_ctx():
     return ctx
 
 
+def _make_ctx2():
+    """ssl.SSLContext directo (sem urllib3)"""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cafile=certifi.where())
+    return ctx
+
+
 @app.route('/', methods=['POST'])
 def proxy():
     endpoint    = request.headers.get('X-AT-Endpoint', 'series').lstrip('/')
@@ -105,6 +115,74 @@ def run_test():
         ssl_sock.close()
         lines.append(f'6. recv OK ({len(resp)} bytes)')
         lines.append(resp[:500].decode('utf-8', errors='replace'))
+    except Exception as e:
+        lines.append(f'FAILED: {type(e).__name__}: {e}')
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/run-test2')
+def run_test2():
+    """Usa ssl.SSLContext directo (sem urllib3), lê com makefile()"""
+    soap = b'<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
+    lines = []
+    ssl_sock = None
+    try:
+        ctx = _make_ctx2()
+        lines.append('1. _make_ctx2 OK')
+        raw = socket.create_connection((AT_HOST, 700), timeout=15)
+        raw.settimeout(15)
+        lines.append('2. TCP connect OK')
+        ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST)
+        lines.append(f'3. wrap+handshake OK (TLS {ssl_sock.version()})')
+        req = (
+            b'POST /fews/versao HTTP/1.1\r\n'
+            b'Host: ' + AT_HOST.encode() + b'\r\n'
+            b'Content-Type: text/xml; charset=utf-8\r\n'
+            b'SOAPAction: "versao"\r\n'
+            b'Content-Length: ' + str(len(soap)).encode() + b'\r\n'
+            b'Connection: close\r\n\r\n'
+            + soap
+        )
+        ssl_sock.sendall(req)
+        lines.append('4. sendall OK')
+        # read via makefile
+        f = ssl_sock.makefile('rb')
+        resp_bytes = f.read(4096)
+        lines.append(f'5. read OK ({len(resp_bytes)} bytes)')
+        lines.append(resp_bytes[:500].decode('utf-8', errors='replace'))
+    except ssl.SSLError as e:
+        lines.append(f'FAILED SSLError lib={getattr(e,"library","?")} reason={getattr(e,"reason","?")} args={e.args}')
+    except Exception as e:
+        lines.append(f'FAILED: {type(e).__name__}: {e}')
+    finally:
+        if ssl_sock:
+            try: ssl_sock.close()
+            except: pass
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/run-test3')
+def run_test3():
+    """Usa http.client.HTTPSConnection com _make_ctx2"""
+    soap = b'<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
+    lines = []
+    try:
+        conn = http.client.HTTPSConnection(AT_HOST, port=700, timeout=15, context=_make_ctx2())
+        lines.append('1. HTTPSConnection created')
+        conn.request('POST', '/fews/versao', body=soap, headers={
+            'Content-Type': 'text/xml; charset=utf-8',
+            'SOAPAction': '"versao"',
+            'Host': AT_HOST,
+        })
+        lines.append('2. request sent')
+        resp = conn.getresponse()
+        lines.append(f'3. getresponse OK status={resp.status}')
+        data = resp.read()
+        conn.close()
+        lines.append(f'4. read OK ({len(data)} bytes)')
+        lines.append(data[:500].decode('utf-8', errors='replace'))
+    except ssl.SSLError as e:
+        lines.append(f'FAILED SSLError lib={getattr(e,"library","?")} reason={getattr(e,"reason","?")} args={e.args}')
     except Exception as e:
         lines.append(f'FAILED: {type(e).__name__}: {e}')
     return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
