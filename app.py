@@ -15,13 +15,6 @@ AT_URLS = {
 
 @app.route('/', methods=['POST'])
 def proxy():
-    # Autenticação — lido no momento do request para garantir env var actualizada
-    PROXY_SECRET = os.environ.get('PROXY_SECRET', '').strip()
-    secret = request.headers.get('X-Proxy-Secret', '').strip()
-    if not PROXY_SECRET or secret != PROXY_SECRET:
-        dbg = f"env_len={len(PROXY_SECRET)} hdr_len={len(secret)} match={secret==PROXY_SECRET}"
-        return Response(f'Unauthorized: {dbg}', status=401)
-
     endpoint   = request.headers.get('X-AT-Endpoint', 'series').lstrip('/')
     ambiente   = request.headers.get('X-AT-Ambiente', 'teste')
     soap_action = request.headers.get('X-SOAP-Action', '')
