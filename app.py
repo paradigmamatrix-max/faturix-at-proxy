@@ -33,35 +33,20 @@ def _make_ctx():
     return ctx
 
 
-class ATHTTPSConn(http.client.HTTPSConnection):
-    """Ligação HTTPS com ssl_context personalizado (handshake manual)"""
-    def __init__(self, host, port, ssl_ctx):
-        super().__init__(host, port=port, timeout=30)
-        self._ssl_ctx = ssl_ctx
-
-    def connect(self):
-        raw = socket.create_connection((self.host, self.port), timeout=10)
-        ssl_sock = self._ssl_ctx.wrap_socket(
-            raw,
-            server_hostname=self.host,
-            do_handshake_on_connect=False,
-        )
-        ssl_sock.do_handshake()
-        self.sock = ssl_sock
-
-
 @app.route('/', methods=['POST'])
 def proxy():
     endpoint    = request.headers.get('X-AT-Endpoint', 'series').lstrip('/')
     ambiente    = request.headers.get('X-AT-Ambiente', 'teste')
     soap_action = request.headers.get('X-SOAP-Action', '')
 
-    port     = AT_PORTS.get(ambiente, AT_PORTS['teste'])
-    path     = f'/fews/{endpoint}'
+    port      = AT_PORTS.get(ambiente, AT_PORTS['teste'])
+    path      = f'/fews/{endpoint}'
     soap_body = request.get_data()
 
     try:
-        conn = ATHTTPSConn(AT_HOST, port, _make_ctx())
+        # Usa o context= nativo do HTTPSConnection (sem override de connect)
+        conn = http.client.HTTPSConnection(
+            AT_HOST, port=port, timeout=30, context=_make_ctx())
         conn.request(
             'POST', path, body=soap_body,
             headers={
