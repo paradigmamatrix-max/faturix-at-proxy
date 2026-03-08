@@ -54,7 +54,7 @@ def proxy():
                 'SOAPAction': soap_action,
             },
             timeout=30,
-            verify=False,
+            verify=True,
         )
         return Response(
             resp.content,
