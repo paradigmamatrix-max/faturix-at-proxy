@@ -340,12 +340,13 @@ def openssl_test():
                 '</ns1:obterVersaoServico></soap:Body></soap:Envelope>')
     try:
         result = subprocess.run(
-            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-quiet', '-no_ticket'],
+            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-msg', '-debug'],
             input=soap_str.encode(), capture_output=True, timeout=20
         )
         out = result.stdout.decode('utf-8', errors='replace')
         err = result.stderr.decode('utf-8', errors='replace')
-        return f'RC={result.returncode}\nSTDOUT:\n{out[:1000]}\nSTDERR:\n{err[:500]}', 200, {'Content-Type': 'text/plain'}
+        # mostrar apenas as últimas 2000 chars do stderr para ver o erro
+        return f'RC={result.returncode}\nSTDOUT:\n{out[:500]}\nSTDERR (tail):\n{err[-2000:]}', 200, {'Content-Type': 'text/plain'}
     except Exception as e:
         return f'error: {e}', 200, {'Content-Type': 'text/plain'}
 
