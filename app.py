@@ -40,7 +40,6 @@ def _make_pool():
     return urllib3.PoolManager(
         ssl_context=_make_ctx(),
         assert_hostname=False,
-        cert_reqs='CERT_NONE',
     )
 
 
