@@ -34,13 +34,18 @@ def _make_ctx():
 
 
 def _make_ctx2():
-    """ssl.SSLContext directo (sem urllib3), forçando http/1.1 via ALPN"""
+    """ssl.SSLContext directo (sem urllib3), forçando http/1.1 via ALPN, sem session tickets"""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.set_ciphers('DEFAULT@SECLEVEL=1')
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=certifi.where())
     ctx.set_alpn_protocols(['http/1.1'])
+    # desabilita session tickets – evita NewSessionTicket pós-handshake que pode confundir estado TLS
+    try:
+        ctx.options |= ssl.OP_NO_TICKET
+    except AttributeError:
+        pass
     return ctx
 
 
@@ -196,6 +201,57 @@ def run_test_selfcert():
             resp_bytes = f.read(4096)
             lines.append(f'5. read OK ({len(resp_bytes)} bytes)')
             lines.append(resp_bytes[:500].decode('utf-8', errors='replace'))
+    except ssl.SSLError as e:
+        lines.append(f'FAILED SSLError lib={getattr(e,"library","?")} reason={getattr(e,"reason","?")} args={e.args}')
+    except Exception as e:
+        lines.append(f'FAILED: {type(e).__name__}: {e}')
+    finally:
+        if ssl_sock:
+            try: ssl_sock.close()
+            except: pass
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/run-test-notkt')
+def run_test_notkt():
+    """Testa com OP_NO_TICKET + tenta recv antes de enviar (flush NewSessionTicket)"""
+    soap = b'<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
+    lines = []
+    ssl_sock = None
+    try:
+        ctx = _make_ctx2()  # já inclui OP_NO_TICKET
+        raw = socket.create_connection((AT_HOST, 700), timeout=15)
+        raw.settimeout(3)  # timeout curto para recv antes de enviar
+        ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST)
+        lines.append(f'1. handshake OK TLS={ssl_sock.version()}')
+        # tentar ler dados que o servidor envie imediatamente pós-handshake (NewSessionTicket etc.)
+        pre_data = b''
+        for _ in range(5):
+            try:
+                chunk = ssl_sock.recv(4096)
+                if chunk:
+                    pre_data += chunk
+                    lines.append(f'  pre-recv: {len(chunk)} bytes')
+                else:
+                    break
+            except ssl.SSLWantReadError:
+                break
+            except socket.timeout:
+                break
+            except Exception as ex:
+                lines.append(f'  pre-recv error: {ex}')
+                break
+        lines.append(f'2. pre-recv done ({len(pre_data)} bytes total)')
+        ssl_sock.settimeout(15)
+        req = (b'POST /fews/versao HTTP/1.1\r\nHost: ' + AT_HOST.encode() +
+               b'\r\nContent-Type: text/xml; charset=utf-8\r\nSOAPAction: "versao"\r\nContent-Length: '
+               + str(len(soap)).encode() + b'\r\nConnection: close\r\n\r\n' + soap)
+        ssl_sock.sendall(req)
+        lines.append('3. sendall OK')
+        f = ssl_sock.makefile('rb')
+        resp_bytes = f.read(4096)
+        lines.append(f'4. read OK ({len(resp_bytes)} bytes)')
+        lines.append(resp_bytes[:500].decode('utf-8', errors='replace'))
     except ssl.SSLError as e:
         lines.append(f'FAILED SSLError lib={getattr(e,"library","?")} reason={getattr(e,"reason","?")} args={e.args}')
     except Exception as e:
