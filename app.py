@@ -222,6 +222,25 @@ def get_cert():
     return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
 
 
+@app.route('/curl-test')
+def curl_test():
+    """Testa ligação AT usando curl como subprocess"""
+    import subprocess
+    soap = '<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
+    url = f'https://{AT_HOST}:700/fews/versao'
+    try:
+        result = subprocess.run(
+            ['curl', '-v', '--max-time', '20', '-X', 'POST', url,
+             '-H', 'Content-Type: text/xml; charset=utf-8',
+             '-H', 'SOAPAction: versao',
+             '-d', soap],
+            capture_output=True, text=True, timeout=25
+        )
+        return f'STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}', 200, {'Content-Type': 'text/plain'}
+    except Exception as e:
+        return f'subprocess error: {e}', 200, {'Content-Type': 'text/plain'}
+
+
 @app.route('/version')
 def version():
     import sys
