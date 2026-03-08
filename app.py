@@ -340,7 +340,7 @@ def openssl_test():
                 '</ns1:obterVersaoServico></soap:Body></soap:Envelope>')
     try:
         result = subprocess.run(
-            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-quiet'],
+            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-quiet', '-no_ticket'],
             input=soap_str.encode(), capture_output=True, timeout=20
         )
         out = result.stdout.decode('utf-8', errors='replace')
