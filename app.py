@@ -8,8 +8,6 @@ from flask import Flask, request, Response
 
 app = Flask(__name__)
 
-PROXY_SECRET = os.environ.get('PROXY_SECRET', '')
-
 AT_URLS = {
     'teste':    'https://servicos.portaldasfinancas.gov.pt:700/fews',
     'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
@@ -17,8 +15,9 @@ AT_URLS = {
 
 @app.route('/', methods=['POST'])
 def proxy():
-    # Autenticação
-    secret = request.headers.get('X-Proxy-Secret', '')
+    # Autenticação — lido no momento do request para garantir env var actualizada
+    PROXY_SECRET = os.environ.get('PROXY_SECRET', '').strip()
+    secret = request.headers.get('X-Proxy-Secret', '').strip()
     if not PROXY_SECRET or secret != PROXY_SECRET:
         return Response('Unauthorized', status=401)
 
