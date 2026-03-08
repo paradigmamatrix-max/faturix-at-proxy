@@ -71,6 +71,38 @@ def proxy():
         return Response(f'Proxy error: {e}', status=502)
 
 
+@app.route('/debug-proxy')
+def debug_proxy():
+    """Testa ligação AT com código idêntico ao /get-cert mas faz SOAP request"""
+    ctx = _make_ctx()
+    soap = b'<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><versao xmlns="http://at.gov.pt/"/></soapenv:Body></soapenv:Envelope>'
+    try:
+        raw = socket.create_connection((AT_HOST, 700), timeout=10)
+        ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST, do_handshake_on_connect=False)
+        ssl_sock.do_handshake()
+        # Envia HTTP request manual
+        req = (
+            b'POST /fews/versao HTTP/1.1\r\n'
+            b'Host: ' + AT_HOST.encode() + b'\r\n'
+            b'Content-Type: text/xml; charset=utf-8\r\n'
+            b'SOAPAction: versao\r\n'
+            b'Content-Length: ' + str(len(soap)).encode() + b'\r\n'
+            b'Connection: close\r\n\r\n'
+            + soap
+        )
+        ssl_sock.sendall(req)
+        resp = b''
+        while True:
+            chunk = ssl_sock.recv(4096)
+            if not chunk:
+                break
+            resp += chunk
+        ssl_sock.close()
+        return resp[:2000], 200, {'Content-Type': 'text/plain'}
+    except Exception as e:
+        return f'Error: {type(e).__name__}: {e}', 502, {'Content-Type': 'text/plain'}
+
+
 @app.route('/get-cert')
 def get_cert():
     """Extrai o certificado TLS da AT"""
