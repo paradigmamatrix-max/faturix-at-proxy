@@ -4,10 +4,10 @@ Relay entre backoffice.faturix.pt e os WebServices AT (portas 700/400)
 """
 import os
 import ssl
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.ssl_ import create_urllib3_context
+import urllib3
 from flask import Flask, request, Response
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
@@ -16,25 +16,20 @@ AT_URLS = {
     'producao': 'https://servicos.portaldasfinancas.gov.pt:400/fews',
 }
 
-class LegacySSLAdapter(HTTPAdapter):
-    """Permite TLS legacy para servidores AT (governo português usa cifras antigas)"""
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = create_urllib3_context()
-        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
-        except AttributeError:
-            pass
-        kwargs['ssl_context'] = ctx
-        return super().init_poolmanager(*args, **kwargs)
 
-    def cert_verify(self, conn, url, verify, cert):
-        # AT usa certificado auto-assinado — forçar CERT_NONE
-        conn.cert_reqs = 'CERT_NONE'
-        conn.ca_certs = None
-        conn.assert_hostname = False
+def _make_pool():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+    try:
+        ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    except AttributeError:
+        pass
+    return urllib3.PoolManager(ssl_context=ctx)
+
+
+_pool = _make_pool()
 
 
 @app.route('/', methods=['POST'])
@@ -48,35 +43,34 @@ def proxy():
 
     soap_body = request.get_data()
 
-    session = requests.Session()
-    session.mount('https://', LegacySSLAdapter())
-
     try:
-        resp = session.post(
+        resp = _pool.request(
+            'POST',
             at_url,
-            data=soap_body,
+            body=soap_body,
             headers={
                 'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': soap_action,
+                'SOAPAction':   soap_action,
             },
-            timeout=30,
-            verify=True,
+            timeout=urllib3.Timeout(connect=10, read=30),
         )
         return Response(
-            resp.content,
-            status=resp.status_code,
+            resp.data,
+            status=resp.status,
             headers={'Content-Type': 'text/xml; charset=utf-8'},
         )
-    except requests.exceptions.SSLError as e:
+    except urllib3.exceptions.SSLError as e:
         return Response(f'SSL error: {e}', status=502)
-    except requests.exceptions.ConnectionError as e:
+    except urllib3.exceptions.MaxRetryError as e:
         return Response(f'Connection error: {e}', status=502)
     except Exception as e:
         return Response(f'Proxy error: {e}', status=502)
 
+
 @app.route('/health')
 def health():
     return 'OK'
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
