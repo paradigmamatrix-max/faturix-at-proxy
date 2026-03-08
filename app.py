@@ -339,13 +339,16 @@ def openssl_test():
                 '<soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif>'
                 '</ns1:obterVersaoServico></soap:Body></soap:Envelope>')
     try:
-        result = subprocess.run(
-            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-ign_eof', '-quiet'],
+        # tentar com cipher diferente: excluir TLS_AES_128_GCM_SHA256 e usar AES-256 ou CHACHA20
+        result256 = subprocess.run(
+            ['openssl', 's_client', '-connect', f'{AT_HOST}:700', '-ign_eof', '-quiet',
+             '-ciphersuites', 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256'],
             input=soap_str.encode(), capture_output=True, timeout=20
         )
-        out = result.stdout.decode('utf-8', errors='replace')
-        err = result.stderr.decode('utf-8', errors='replace')
-        return f'RC={result.returncode}\nSTDOUT:\n{out[:2000]}\nSTDERR:\n{err[-500:]}', 200, {'Content-Type': 'text/plain'}
+        out256 = result256.stdout.decode('utf-8', errors='replace')
+        err256 = result256.stderr.decode('utf-8', errors='replace')
+        return (f'=== TLS_AES_256_GCM / CHACHA20 ===\nRC={result256.returncode}\n'
+                f'STDOUT:\n{out256[:1000]}\nSTDERR:\n{err256[-500:]}'), 200, {'Content-Type': 'text/plain'}
     except Exception as e:
         return f'error: {e}', 200, {'Content-Type': 'text/plain'}
 
