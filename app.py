@@ -78,6 +78,54 @@ def proxy():
         return Response(f'Proxy error: {e}', status=502)
 
 
+@app.route('/get-cert')
+def get_cert():
+    """Extrai o certificado TLS da AT para diagnóstico"""
+    import socket
+    import base64
+    ctx2 = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx2.check_hostname = False
+    ctx2.verify_mode = ssl.CERT_REQUIRED
+    ctx2.load_verify_locations(cafile=certifi.where())
+    ctx2.set_ciphers('DEFAULT@SECLEVEL=1')
+    try:
+        ctx2.maximum_version = ssl.TLSVersion.TLSv1_2
+    except AttributeError:
+        pass
+    lines = []
+    try:
+        sock = socket.create_connection(
+            ('servicos.portaldasfinancas.gov.pt', 700), timeout=10)
+        ssl_sock = ctx2.wrap_socket(
+            sock,
+            server_hostname='servicos.portaldasfinancas.gov.pt',
+            do_handshake_on_connect=False,
+        )
+        try:
+            ssl_sock.do_handshake()
+            lines.append('Handshake OK (no cert error)')
+        except ssl.SSLCertVerificationError as e:
+            lines.append(f'CertVerificationError (expected): {e}')
+        except ssl.SSLError as e:
+            lines.append(f'SSLError: {e}')
+            return '\n'.join(lines)
+        # Try to get peer cert even after error
+        try:
+            der = ssl_sock.getpeercert(binary_form=True)
+            if der:
+                pem = ('-----BEGIN CERTIFICATE-----\n'
+                       + base64.b64encode(der).decode() + '\n'
+                       + '-----END CERTIFICATE-----')
+                lines.append(pem)
+            else:
+                lines.append('No peer cert available')
+        except Exception as e2:
+            lines.append(f'getpeercert error: {e2}')
+    except Exception as e:
+        lines.append(f'Connection error: {e}')
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
 @app.route('/health')
 def health():
     return 'OK'
