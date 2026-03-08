@@ -162,6 +162,58 @@ def run_test2():
     return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
 
 
+@app.route('/run-test-selfcert')
+def run_test_selfcert():
+    """Testa ligação AT com certificado cliente auto-assinado"""
+    import tempfile, datetime
+    lines = []
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        # gerar chave e cert auto-assinado
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, u'faturix-proxy')])
+        cert = (x509.CertificateBuilder()
+            .subject_name(subject).issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.utcnow())
+            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=1))
+            .sign(key, hashes.SHA256()))
+        with tempfile.NamedTemporaryFile(suffix='.pem', delete=False, mode='wb') as cf:
+            cf.write(cert.public_bytes(serialization.Encoding.PEM))
+            cert_path = cf.name
+        with tempfile.NamedTemporaryFile(suffix='.pem', delete=False, mode='wb') as kf:
+            kf.write(key.private_bytes(serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+            key_path = kf.name
+        lines.append('1. cert gerado OK')
+        ctx = _make_ctx2()
+        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        lines.append('2. ctx com client cert OK')
+        soap = b'<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
+        raw = socket.create_connection((AT_HOST, 700), timeout=15)
+        raw.settimeout(15)
+        ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST)
+        lines.append(f'3. handshake OK TLS={ssl_sock.version()}')
+        req = (b'POST /fews/versao HTTP/1.1\r\nHost: ' + AT_HOST.encode() +
+               b'\r\nContent-Type: text/xml; charset=utf-8\r\nSOAPAction: "versao"\r\nContent-Length: '
+               + str(len(soap)).encode() + b'\r\nConnection: close\r\n\r\n' + soap)
+        ssl_sock.sendall(req)
+        lines.append('4. sendall OK')
+        f = ssl_sock.makefile('rb')
+        resp_bytes = f.read(4096)
+        lines.append(f'5. read OK ({len(resp_bytes)} bytes)')
+        lines.append(resp_bytes[:500].decode('utf-8', errors='replace'))
+    except ssl.SSLError as e:
+        lines.append(f'FAILED SSLError lib={getattr(e,"library","?")} reason={getattr(e,"reason","?")} args={e.args}')
+    except Exception as e:
+        lines.append(f'FAILED: {type(e).__name__}: {e}')
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
 @app.route('/run-test3')
 def run_test3():
     """Usa http.client.HTTPSConnection com _make_ctx2"""
@@ -220,6 +272,23 @@ def get_cert():
     except Exception as e:
         lines.append(f'Connection error: {e}')
     return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/openssl-test')
+def openssl_test():
+    """Testa ligação AT com openssl s_client subprocess"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['openssl', 's_client', '-connect', f'{AT_HOST}:700',
+             '-no_ign_eof', '-brief'],
+            input=b'', capture_output=True, timeout=15
+        )
+        out = result.stdout.decode('utf-8', errors='replace')
+        err = result.stderr.decode('utf-8', errors='replace')
+        return f'RC={result.returncode}\nSTDOUT:\n{out}\nSTDERR:\n{err}', 200, {'Content-Type': 'text/plain'}
+    except Exception as e:
+        return f'error: {e}', 200, {'Content-Type': 'text/plain'}
 
 
 @app.route('/curl-test')
