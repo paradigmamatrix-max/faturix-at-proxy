@@ -74,7 +74,7 @@ def proxy():
 @app.route('/run-test')
 def run_test():
     """Faz handshake TLS + SOAP no mesmo ssl socket (tudo num request)"""
-    soap = b'<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><versao xmlns="http://at.gov.pt/"/></soapenv:Body></soapenv:Envelope>'
+    soap = b'<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://servicos.portaldasfinancas.gov.pt/faturas/"><soap:Body><ns1:obterVersaoServico><ns1:nif>518651746</ns1:nif></ns1:obterVersaoServico></soap:Body></soap:Envelope>'
     lines = []
     try:
         ctx = _make_ctx()
