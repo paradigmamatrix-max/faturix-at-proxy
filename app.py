@@ -71,16 +71,20 @@ def proxy():
         return Response(f'Proxy error: {e}', status=502)
 
 
-@app.route('/debug-proxy')
-def debug_proxy():
-    """Testa ligação AT com código idêntico ao /get-cert mas faz SOAP request"""
-    ctx = _make_ctx()
+@app.route('/run-test')
+def run_test():
+    """Faz handshake TLS + SOAP no mesmo ssl socket (tudo num request)"""
     soap = b'<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><versao xmlns="http://at.gov.pt/"/></soapenv:Body></soapenv:Envelope>'
+    lines = []
     try:
+        ctx = _make_ctx()
+        lines.append('1. _make_ctx OK')
         raw = socket.create_connection((AT_HOST, 700), timeout=10)
+        lines.append('2. TCP connect OK')
         ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST, do_handshake_on_connect=False)
+        lines.append('3. wrap_socket OK')
         ssl_sock.do_handshake()
-        # Envia HTTP request manual
+        lines.append('4. do_handshake OK')
         req = (
             b'POST /fews/versao HTTP/1.1\r\n'
             b'Host: ' + AT_HOST.encode() + b'\r\n'
@@ -91,6 +95,7 @@ def debug_proxy():
             + soap
         )
         ssl_sock.sendall(req)
+        lines.append('5. sendall OK')
         resp = b''
         while True:
             chunk = ssl_sock.recv(4096)
@@ -98,9 +103,11 @@ def debug_proxy():
                 break
             resp += chunk
         ssl_sock.close()
-        return resp[:2000], 200, {'Content-Type': 'text/plain'}
+        lines.append(f'6. recv OK ({len(resp)} bytes)')
+        lines.append(resp[:500].decode('utf-8', errors='replace'))
     except Exception as e:
-        return f'Error: {type(e).__name__}: {e}', 502, {'Content-Type': 'text/plain'}
+        lines.append(f'FAILED: {type(e).__name__}: {e}')
+    return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
 
 
 @app.route('/get-cert')
