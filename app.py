@@ -31,8 +31,10 @@ class LegacySSLAdapter(HTTPAdapter):
         return super().init_poolmanager(*args, **kwargs)
 
     def cert_verify(self, conn, url, verify, cert):
-        # AT usa certificado auto-assinado — não verificar
-        pass
+        # AT usa certificado auto-assinado — forçar CERT_NONE
+        conn.cert_reqs = 'CERT_NONE'
+        conn.ca_certs = None
+        conn.assert_hostname = False
 
 
 @app.route('/', methods=['POST'])
