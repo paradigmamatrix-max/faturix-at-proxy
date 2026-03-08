@@ -34,12 +34,13 @@ def _make_ctx():
 
 
 def _make_ctx2():
-    """ssl.SSLContext directo (sem urllib3)"""
+    """ssl.SSLContext directo (sem urllib3), forçando http/1.1 via ALPN"""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.set_ciphers('DEFAULT@SECLEVEL=1')
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=certifi.where())
+    ctx.set_alpn_protocols(['http/1.1'])
     return ctx
 
 
@@ -56,7 +57,7 @@ def proxy():
     try:
         # Usa o context= nativo do HTTPSConnection (sem override de connect)
         conn = http.client.HTTPSConnection(
-            AT_HOST, port=port, timeout=30, context=_make_ctx())
+            AT_HOST, port=port, timeout=30, context=_make_ctx2())
         conn.request(
             'POST', path, body=soap_body,
             headers={
@@ -133,7 +134,7 @@ def run_test2():
         raw.settimeout(15)
         lines.append('2. TCP connect OK')
         ssl_sock = ctx.wrap_socket(raw, server_hostname=AT_HOST)
-        lines.append(f'3. wrap+handshake OK (TLS {ssl_sock.version()})')
+        lines.append(f'3. wrap+handshake OK (TLS {ssl_sock.version()}, ALPN={ssl_sock.selected_alpn_protocol()})')
         req = (
             b'POST /fews/versao HTTP/1.1\r\n'
             b'Host: ' + AT_HOST.encode() + b'\r\n'
@@ -219,6 +220,12 @@ def get_cert():
     except Exception as e:
         lines.append(f'Connection error: {e}')
     return '\n'.join(lines), 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/version')
+def version():
+    import sys
+    return f'Python {sys.version}\nOpenSSL {ssl.OPENSSL_VERSION}', 200, {'Content-Type': 'text/plain'}
 
 
 @app.route('/health')
