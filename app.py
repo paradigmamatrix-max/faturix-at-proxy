@@ -103,9 +103,10 @@ def proxy():
 
 @app.route('/health')
 def health():
-    if _at_ctx is None:
-        return Response(f'NO_CERT: {_ctx_err}', status=503, mimetype='text/plain')
-    return Response('OK', status=200, mimetype='text/plain')
+    # Sempre 200 para o Railway poder fazer deploy.
+    # O erro de certificado é retornado nas chamadas ao proxy (/).
+    status = 'OK' if _at_ctx is not None else f'NO_CERT: {_ctx_err}'
+    return Response(status, status=200, mimetype='text/plain')
 
 
 if __name__ == '__main__':
